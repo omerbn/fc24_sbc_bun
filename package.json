@@ -1,0 +1,19 @@
+{
+  "name": "omerbn",
+  "version": "1.0.0",
+  "description": "",
+  "main": "run.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "type": "module",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/bun": "^1.1.6"
+  },
+  "esModuleInterop": true,
+  "dependencies": {
+    "mitata": "^0.1.11"
+  }
+}
