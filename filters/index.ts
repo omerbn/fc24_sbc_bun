@@ -74,6 +74,11 @@ export abstract class BaseIterationFilter<ValueType, RequirementType> extends It
         super();
         this._requirement = requirement;
     }
+    
+    // Default implementation - can be overridden by subclasses
+    can_potentially_complete(partial_permutation: ValueType[], size: number, remaining_positions: number): boolean {
+        return true;
+    }
 
     no_requirements() {
         return !this._requirement;

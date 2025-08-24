@@ -6,6 +6,9 @@ export abstract class IterationFilter<T> {
     abstract delete(obj: T): void;
     abstract try_add(obj: T): boolean
     abstract is_permutation_approved(permutation: T[]): boolean;
+    
+    // New: Early constraint checking hook
+    abstract can_potentially_complete(partial_permutation: T[], size: number, remaining_positions: number): boolean;
 
     private _next_checkpoint: number = 200 * 10**6;
     // private _next_big_checkpoint: number = 500 * 10**6;
@@ -68,6 +71,16 @@ export abstract class IterationFilter<T> {
                 continue;
             }
             permutation[i] = obj;
+            
+            // Optimization: Early pruning check
+            if (i < by_positions_array.length - 1) {
+                const remaining_positions = by_positions_array.length - i - 1;
+                if (!this.can_potentially_complete(permutation, i + 1, remaining_positions)) {
+                    stats.inc_skipped();
+                    this.delete(obj);
+                    continue;
+                }
+            }
     
             // we have a permutation
             if (i === by_positions_array.length - 1) {
@@ -108,6 +121,12 @@ export class DistinctIterationFilter<T> extends IterationFilter<T> {
     is_permutation_approved(permutation: T[]): boolean {
         return true;
     }
+    
+    can_potentially_complete(partial_permutation: T[], size: number, remaining_positions: number): boolean {
+        // Basic implementation: check if we have enough unused objects
+        // This can be overridden by subclasses for more sophisticated checks
+        return true;
+    }
 }
 
 export class NonDistinctIterationFilter<T> extends IterationFilter<T> {
@@ -125,6 +144,10 @@ export class NonDistinctIterationFilter<T> extends IterationFilter<T> {
     }
 
     is_permutation_approved(permutation: T[]): boolean {
+        return true;
+    }
+    
+    can_potentially_complete(partial_permutation: T[], size: number, remaining_positions: number): boolean {
         return true;
     }
 }

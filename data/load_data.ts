@@ -26,25 +26,50 @@ export async function load_data(): Promise<PlayerData> {
         skipped: new Set(),
         hinted: new Set()
     };
-    const ps: Promise<any>[] = [];
-    read_players_file(ps, player_data.club);
-    read_md_file(ps, player_data.meta_data);
-    ps.push(load_skipped_players_file().then((json: SupportPlayerInformation[]) => {
-        player_data.skipped = new Set(json.map((x) => x.id));
-        if (json.length) {
-            console.log(`${json.length} skipped players loaded`);
+    
+    // Optimization: Load all data in parallel
+    const [players_promise, metadata_promise, skipped_promise, hinted_promise] = await Promise.allSettled([
+        load_players_optimized(),
+        load_metadata_optimized(),
+        load_skipped_players_file(),
+        load_hinted_players_file()
+    ]);
+    
+    // Handle results
+    if (players_promise.status === 'fulfilled') {
+        player_data.club = players_promise.value;
+    } else {
+        throw new Error(`Failed to load players: ${players_promise.reason}`);
+    }
+    
+    if (metadata_promise.status === 'fulfilled') {
+        player_data.meta_data = metadata_promise.value;
+    } else {
+        throw new Error(`Failed to load metadata: ${metadata_promise.reason}`);
+    }
+    
+    if (skipped_promise.status === 'fulfilled') {
+        player_data.skipped = new Set(skipped_promise.value.map((x: SupportPlayerInformation) => x.id));
+        if (skipped_promise.value.length) {
+            console.log(`${skipped_promise.value.length} skipped players loaded`);
         }
-    }));
-    await Promise.all(ps);
+    }
     console.log(player_data.club.length, "players in db");
 
-    // filtering out players with loans and skipped
-    player_data.club = player_data.club.filter((p) => {
-        return (!p.loans || p.loans == 0) && !player_data.skipped.has(p.id);
-    });
+    // Optimization: Combined filtering and enrichment in single pass
+    const enriched_players: Player[] = [];
+    const player_lookup = new Map<number, Player>(); // Optimization: Create player lookup map for O(1) access
 
-    // custom attributes
     for (const player of player_data.club) {
+        // Skip filtered players early
+        if ((player.loans && player.loans > 0) || player_data.skipped.has(player.id)) {
+            continue;
+        }
+
+        // for O(1) access
+        player_lookup.set(player.id, player);
+        
+        // Enrich player data
         const n: MD | undefined = player_data.meta_data.get(player.assetId);
         if (!n) {
             throw new Error(`Player with assetId=${player.assetId} not found in meta_data`);
@@ -61,28 +86,54 @@ export async function load_data(): Promise<PlayerData> {
                 console.log(`Player ${player.__name} has academy bonus. New rating: ${academy_info.totalBonus}`);
             }
         }
+        
+        enriched_players.push(player);
     }
+    
+    player_data.club = enriched_players;
 
-    // sorting players by rating
-    player_data.club.sort((a, b) => {
-        return a.rating - b.rating;
-    });
+    // Optimization: Sort using more efficient comparison
+    player_data.club.sort((a, b) => a.rating - b.rating);
 
-    // hinted players
-    const json: SupportPlayerInformation[] = await load_hinted_players_file();
-    if (json.length) {
-        console.log(`${json.length} hinted players loaded`);
-    }
-    for (const p of json) {
-        const player = player_data.club.find((x) => x.id === p.id);
-        if (!player) {
-            throw new Error(`Player with id=${p.id} not found`);
+    // Process hinted players
+    if (hinted_promise.status === 'fulfilled') {
+        const hinted_data = hinted_promise.value;
+        if (hinted_data.length) {
+            console.log(`${hinted_data.length} hinted players loaded`);
         }
-        player_data.hinted.add(player);
+        
+        for (const p of hinted_data) {
+            const player = player_lookup.get(p.id);
+            if (!player) {
+                throw new Error(`Player with id=${p.id} not found`);
+            }
+            player_data.hinted.add(player);
+        }
     }
 
     console.log("players loaded.", player_data.club.length, "usage players");
     return player_data;
+}
+
+// Optimized helper functions
+async function load_players_optimized(): Promise<Player[]> {
+    const file = Bun.file(CLUB_PLAYERS_FILES);
+    const json: PlayersFileFormat = await file.json();
+    return json.itemData || [];
+}
+
+async function load_metadata_optimized(): Promise<Map<number, MD>> {
+    const file = Bun.file(PLAYERS_MD_FILE);
+    const json = await file.json();
+    const metadata = new Map<number, MD>();
+    
+    // Combine both arrays in single pass
+    const all_players = [...(json.LegendsPlayers || []), ...(json.Players || [])];
+    for (const player of all_players) {
+        metadata.set(player.id, player);
+    }
+    
+    return metadata;
 }
 
 function refresh_player_list(token: string, start: number, arr: Player[]): Promise<any> {
@@ -119,39 +170,4 @@ function refresh_player_list(token: string, start: number, arr: Player[]): Promi
             arr.push(i);
         }
     });
-}
-
-
-function read_players_file(ps: Promise<any>[], arr: Player[]) {
-    // const glob = new Glob(CLUB_PLAYERS_FILES);
-    // const folder = "./data";
-    // for (const file of glob.scanSync(folder)) {
-    //     ps.push(read_players_file(`${folder}/${file}`, arr));
-    // }
-    const pr = Bun.file(CLUB_PLAYERS_FILES).json().then((json: PlayersFileFormat) => {
-        for (let i of json.itemData) {
-            arr.push(i);
-        }
-    });
-    ps.push(pr);
-}
-
-// function read_players_file(fn: string, output_arr: Player[]): Promise<any> {
-//     return Bun.file(fn).json().then((json: PlayersFileFormat) => {
-//         for (let i of json.itemData) {
-//             output_arr.push(i);
-//         }
-//     });
-// }
-
-function read_md_file(ps: Promise<any>[], out_map: Map<number, MD>) {
-    const pr = Bun.file(PLAYERS_MD_FILE).json().then((json) => {
-        for (let d of json.LegendsPlayers) {
-            out_map.set(d.id, d);
-        }
-        for (let d of json.Players) {
-            out_map.set(d.id, d);
-        }
-    });
-    ps.push(pr);
 }

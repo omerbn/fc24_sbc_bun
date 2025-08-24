@@ -103,6 +103,47 @@ export class RatingIterationFilter extends BaseIterationFilter<number, Ratings> 
 
         return true;
     }
+    
+    can_potentially_complete(partial_permutation: number[], size: number, remaining_positions: number): boolean {
+        if (!this._requirement) return true;
+        
+        // Early pruning for minimum constraints
+        if (this._requirement.min_bronze) {
+            const max_possible_bronze = this._bronze + remaining_positions;
+            if (max_possible_bronze < this._requirement.min_bronze) {
+                STATS.get(this.stats_name).inc_discarded(`early_prune_min_bronze`);
+                return false;
+            }
+        }
+        
+        if (this._requirement.min_silver) {
+            const max_possible_silver = this._silver + remaining_positions;
+            if (max_possible_silver < this._requirement.min_silver) {
+                STATS.get(this.stats_name).inc_discarded(`early_prune_min_silver`);
+                return false;
+            }
+        }
+        
+        if (this._requirement.min_gold) {
+            const max_possible_gold = this._gold + remaining_positions;
+            if (max_possible_gold < this._requirement.min_gold) {
+                STATS.get(this.stats_name).inc_discarded(`early_prune_min_gold`);
+                return false;
+            }
+        }
+        
+        // Early pruning for squad rating
+        if (this._requirement.min_squad) {
+            const max_possible_sum = this._sum + (remaining_positions * 99); // Assume max rating 99
+            const max_possible_avg = max_possible_sum / (this._count + remaining_positions);
+            if (max_possible_avg < this._requirement.min_squad) {
+                STATS.get(this.stats_name).inc_discarded(`early_prune_min_squad`);
+                return false;
+            }
+        }
+        
+        return true;
+    }
 
     protected get_field_name() {
         return "rating";

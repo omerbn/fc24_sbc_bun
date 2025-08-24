@@ -84,6 +84,42 @@ export class SearchFilter {
 
         return players;
     }
+    
+    // Optimization: Additional pre-filtering to reduce search space
+    private _pre_filter_players_by_constraints(players: Player[]): Player[] {
+        if (this._query.allow_random_positions && !this._query.rarity) {
+            return players;
+        }
+
+        return players.filter(player => {
+            // Quick rarity check
+            if (this._query.rarity) {
+                const rarity_name = RarityIterationFilter.FLAG_TO_RARITY.get(player.rareflag);
+                if (this._query.rarity.allowed_rarities?.length) {
+                    if (!this._query.rarity.allowed_rarities.includes(rarity_name)) {
+                        return false;
+                    }
+                }
+                if (this._query.rarity.disallowed_rarities?.length) {
+                    if (this._query.rarity.disallowed_rarities.includes(rarity_name)) {
+                        return false;
+                    }
+                }
+            }
+            
+            // Quick position check
+            if (!this._query.allow_random_positions) {
+                const has_required_position = this._query.positions.some(pos => 
+                    player.possiblePositions.includes(pos)
+                );
+                if (!has_required_position) {
+                    return false;
+                }
+            }
+            
+            return true;
+        });
+    }
 
     find(players: Player[]): Player[][] {
         const results: Player[][] = [];
@@ -99,6 +135,14 @@ export class SearchFilter {
         }
 
         players = this._filter_by_player_rating(players);
+        
+        // Optimization: Additional pre-filtering
+        const original_count = players.length;
+        players = this._pre_filter_players_by_constraints(players);
+        const filtered_count = original_count - players.length;
+        if (filtered_count > 0) {
+            console.log(`Pre-filtered ${filtered_count} players by constraints. Remaining: ${players.length}`);
+        }
 
         // must players
         if (this._query.hinted_players) {
